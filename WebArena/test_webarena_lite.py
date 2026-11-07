@@ -31,6 +31,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import threading
 import logging
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from jitrl_prior import add_prior_arguments
+
 # Suppress browsergym warnings and info logs
 logging.getLogger('browsergym.core.env').setLevel(logging.ERROR)
 logging.getLogger('browsergym.experiments.loop').setLevel(logging.WARNING)
@@ -242,7 +245,8 @@ def run_task(task_id, model, max_steps=15, log_file=None, llm_eval=None, llm_ext
              use_screenshot_action=False, use_screenshot_eval=False, disable_memory=False,
              use_llm_success_eval=False, run_id=None, agent_type='memory', task_timeout=600,
              task_similarity_threshold=0.27, repeat_runs=1, logit_mode='verbalized',
-             result_dir='results', save_html=False, no_save_memory=False):
+             result_dir='results', save_html=False, no_save_memory=False,
+             prior_path=None, prior_kappa=0, prior_return_scale=1):
     """Run a single task and return success status.
 
     Args:
@@ -269,6 +273,10 @@ def run_task(task_id, model, max_steps=15, log_file=None, llm_eval=None, llm_ext
         "--llm_model", model,
         "--max_steps", str(max_steps)
     ]
+
+    if prior_path is not None:
+        cmd.extend(["--prior_path", str(prior_path)])
+    cmd.extend(["--prior_kappa", str(prior_kappa), "--prior_return_scale", str(prior_return_scale)])
 
     # Add agent_type (memory or evotest)
     if agent_type:
@@ -529,7 +537,10 @@ def run_task_wrapper(args_dict):
                      use_screenshot_action, use_screenshot_eval, disable_memory,
                      use_llm_success_eval, repeat_idx + 1, agent_type, task_timeout,
                      task_similarity_threshold, repeat_runs=repeat_runs, logit_mode=logit_mode,
-                     result_dir=result_dir, save_html=save_html, no_save_memory=no_save_memory)
+                     result_dir=result_dir, save_html=save_html, no_save_memory=no_save_memory,
+                     prior_path=args_dict.get('prior_path'),
+                     prior_kappa=args_dict.get('prior_kappa', 0),
+                     prior_return_scale=args_dict.get('prior_return_scale', 1))
     task_duration = time.time() - task_start
 
     # Handle multiple results from run.py (when repeat_runs > 1)
@@ -681,6 +692,7 @@ def get_completed_tasks_from_log_dir(log_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="Test WebArena-Lite tasks (165 tasks) with parallel execution")
+    add_prior_arguments(parser)
     parser.add_argument('--model', type=str,
                        default='google/gemini-2.5-flash',
                        help='LLM model to use. Can be API model name (e.g., "gpt-4o", "claude-3-opus") or local model path (e.g., "/path/to/local/model")')
@@ -892,6 +904,9 @@ def main():
                         'result_dir': args.result_dir,
                         'save_html': args.save_html,
                         'no_save_memory': args.no_save_memory,
+                        'prior_path': args.prior_path,
+                        'prior_kappa': args.prior_kappa,
+                        'prior_return_scale': args.prior_return_scale,
                         'task_success_flags': {} if args.workers > 1 else task_success_flags,
                         'success_lock': None if args.workers > 1 else success_lock
                     })
@@ -920,6 +935,9 @@ def main():
                     'result_dir': args.result_dir,
                     'save_html': args.save_html,
                     'no_save_memory': args.no_save_memory,
+                    'prior_path': args.prior_path,
+                    'prior_kappa': args.prior_kappa,
+                    'prior_return_scale': args.prior_return_scale,
                     'task_success_flags': {} if args.workers > 1 else task_success_flags,
                     'success_lock': None if args.workers > 1 else success_lock
                 })

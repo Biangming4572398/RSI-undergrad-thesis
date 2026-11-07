@@ -3,8 +3,13 @@ import math
 import os
 import re
 import random
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from jitrl_prior import PrototypeMemory
+
 from browsergym.experiments import Agent, AbstractAgentArgs
 from browsergym.utils.obs import flatten_axtree_to_str, flatten_dom_to_str, prune_html
 
@@ -84,6 +89,7 @@ class BrowserGymJitRLAgent(Agent):
         # Check both enable_cross_mem and disable_memory flags
         disable_memory = getattr(self.args, 'disable_memory', False)
         self.enable_cross_mem = getattr(self.args, 'enable_cross_mem', True) and not disable_memory
+        self.prior_memory = PrototypeMemory.from_args(self.args) if self.enable_cross_mem else None
         self.logit_mode = getattr(self.args, 'logit_mode', 'token')  # 'token' or 'verbalized'
 
         self.action_space = ActionSpace(self.flags)
@@ -219,7 +225,7 @@ class BrowserGymJitRLAgent(Agent):
                 screenshots_dir=screenshots_dir,
             )
 
-        if not nearest_trajectories:
+        if not nearest_trajectories and self.prior_memory is None:
             return {}
 
         # Add actions from nearest_trajectories to options_with_logits
@@ -282,6 +288,19 @@ class BrowserGymJitRLAgent(Agent):
                     'normalized_prob': 0
                 }
                 print(f"[Memory] Added historical action from memory: {normalized_action} -> {raw_action}")
+
+        prior_estimate = None
+        if self.prior_memory is not None:
+            candidate_actions = [
+                option.get('normalized_action', option['action'])
+                for option in options_with_logits.values()
+            ]
+            prior_estimate = self.prior_memory.estimate(
+                state_node.state, action_rewards, candidate_actions
+            )
+        if not nearest_trajectories and prior_estimate is None:
+            return {}
+
         # Step 4: Calculate average discounted reward for each NORMALIZED action
         action_avg_rewards = {}  # Key: normalized_action
         for normalized_action, rewards in action_rewards.items():
@@ -308,21 +327,24 @@ class BrowserGymJitRLAgent(Agent):
         alpha = 1
         new_actions_added = False
 
-        # Step 5: For candidate actions not in history, assign exploration reward
-        for option_num, option_data in options_with_logits.items():
-            normalized_action = option_data.get('normalized_action', option_data.get('action'))
+        if prior_estimate is not None:
+            action_avg_rewards, overall_avg_reward = prior_estimate
+        else:
+            # Step 5: For candidate actions not in history, assign exploration reward
+            for option_num, option_data in options_with_logits.items():
+                normalized_action = option_data.get('normalized_action', option_data.get('action'))
 
-            if normalized_action not in action_avg_rewards:
-                if random.random() < exploration_prob:
-                    action_avg_rewards[normalized_action] = overall_avg_reward + alpha / max(count, 1)
-                else:
-                    action_avg_rewards[normalized_action] = 0
-                new_actions_added = True
+                if normalized_action not in action_avg_rewards:
+                    if random.random() < exploration_prob:
+                        action_avg_rewards[normalized_action] = overall_avg_reward + alpha / max(count, 1)
+                    else:
+                        action_avg_rewards[normalized_action] = 0
+                    new_actions_added = True
 
-        # If new actions were added, recalculate overall_avg_reward
-        if new_actions_added:
-            all_avg_rewards = list(action_avg_rewards.values())
-            overall_avg_reward = sum(all_avg_rewards) / len(all_avg_rewards) if all_avg_rewards else 0
+            # If new actions were added, recalculate overall_avg_reward
+            if new_actions_added:
+                all_avg_rewards = list(action_avg_rewards.values())
+                overall_avg_reward = sum(all_avg_rewards) / len(all_avg_rewards) if all_avg_rewards else 0
 
         # Step 6: Calculate advantage value for each NORMALIZED action
         action_advantages = {}  # Key: normalized_action
@@ -743,6 +765,15 @@ Output your response as a JSON object with the specified fields."""
 {memory_text}
 
 Analyze the current state, consider your recent history, and provide {self.args.top_actions} different and useful actions with reasoning for each, then choose the best one."""
+
+        if self.prior_memory is not None:
+            action_types = self.prior_memory.action_types(state_node.state)
+            if action_types:
+                user_prompt += (
+                    "\n\nPrior memory suggests these action types: " + ", ".join(action_types)
+                    + ". Consider them only when they fit the current task. "
+                    "Use element IDs and arguments from the current state."
+                )
 
         return sys_prompt, user_prompt, memory_text
     

@@ -270,6 +270,92 @@ JitRL supports any model available through OpenRouter:
 
 ## Advanced Usage
 
+### Prototype prior memory (JitRL-P)
+
+Both agents can use a separate prior memory, `M₀`. This prototype follows the value mix in
+`index.html` and `jitrl_p_visual (1).html`. It does not train the LLM.
+
+For each candidate action, the unit calculates:
+
+```text
+Q = (sum(local action returns) + kappa * prior action value) / (action count + kappa)
+V = (sum(all local returns) + kappa * prior state value) / (state count + kappa)
+advantage = Q - V
+```
+
+The agent then uses its existing advantage normalization and score correction.
+The current code adds normalized advantages to confidence scores. It does not implement
+the raw-logit equation shown in the HTML files.
+
+Build a prior from saved `episodes.jsonl` files. Run this command from the repository root:
+
+```bash
+python jitrl_prior.py \
+  --source source_game 10 path/to/source_game/episodes.jsonl \
+  --source other_game 20 path/to/other_game/episodes.jsonl \
+  --gamma 0.5 --output prior.json
+```
+
+Each `--source` takes a domain name, a positive return scale, and a file path.
+The builder divides returns by that scale. For example, scale `10` maps return `10` to value `1`.
+Choose source and target scales that give values the same meaning.
+The builder preserves the return calculation of each environment.
+It combines rows with the same domain, state key, and action type.
+Use `--exclude_domain NAME` to leave a source domain out of the build.
+Keep target-domain data out of the source files.
+
+To check the builder with synthetic data:
+
+```bash
+python jitrl_prior.py --source toy 1 examples/prior_source.jsonl \
+  --gamma 0.5 --output /tmp/jitrl-toy-prior.json
+python -m unittest discover -s tests -v
+```
+
+The example contains invented values. It is not a trained prior or a benchmark result.
+
+Run Jericho with a prior:
+
+```bash
+cd Jericho
+python main.py --game_name zork1 --agent_type jitrl \
+  --prior_path ../prior.json --prior_kappa 2 --prior_return_scale 10 \
+  --gamma 0.5 --output_path output/prior-trial
+```
+
+Run WebArena with a prior built with the same discount factor:
+
+```bash
+cd WebArena
+python test_webarena_lite.py --tasks 0 --repeat 3 \
+  --prior_path ../web-prior.json --prior_kappa 2 --prior_return_scale 1
+```
+
+The WebArena runner uses `gamma=0.1` by default. Build `web-prior.json` with `--gamma 0.1`.
+The prior loader rejects a different discount factor.
+
+| Argument | Default | Purpose |
+|----------|---------|---------|
+| `--prior_path` | None | Read the prior JSON file. |
+| `--prior_kappa` | `0` | Set the prior strength. Zero keeps the existing JitRL path. |
+| `--prior_return_scale` | `1` | Divide local returns by this positive value before the mix. |
+
+Local episode files keep their existing format. Calibration occurs when values are read.
+Disabling cross-episode memory also disables the prior.
+An absent prior match uses the existing JitRL path, including its exploration rule.
+For an unmatched action type, the unit uses the local mean when local evidence exists.
+Otherwise, it uses the mixed state value, which gives zero advantage.
+Prior action types guide the LLM proposals. Source object names and browser element IDs
+are not added as executable actions.
+The LLM can omit a suggested type, so this does not guarantee the candidate union in the HTML design.
+
+This prototype uses fixed text keys and action types. It does not learn keys, calibration,
+or `kappa`. The domain hold-out search in the HTML design remains a separate research step.
+The count `n` is the number of retrieved local rows, not the episode count.
+A fixed retrieval limit can prevent the prior weight from reaching zero.
+The existing advantage normalization can also retain a score bias when value differences become small.
+No improvement in task success is claimed.
+
 ### Clearing Memory
 
 ```python

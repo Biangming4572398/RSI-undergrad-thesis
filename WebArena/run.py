@@ -51,6 +51,7 @@ from browsergym.core.env import BrowserEnv
 
 from memory_agents.jitrl_agent import JitRLAgentArgs
 from memory_agents.utils.openai_helpers import TokenLimitExceededError
+from jitrl_prior import add_prior_arguments
 
 
 def str2bool(v):
@@ -66,6 +67,7 @@ def str2bool(v):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run experiment with hyperparameters.")
+    add_prior_arguments(parser)
     # Environment settings
     parser.add_argument(
         "--task_name",

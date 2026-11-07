@@ -2,6 +2,13 @@ import math
 import random
 import os
 import time
+import sys
+from pathlib import Path
+
+# Both environment runners can start from their own directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from jitrl_prior import PrototypeMemory
+
 from .openai_helpers import chat_completion_with_retries
 from .cross_episode_memory import CrossEpisodeMemory
 from .utils import generate_trajectory_summary, generate_history_summary
@@ -14,6 +21,7 @@ class JitRLAgent:
         self.args = args
         self.best_score = float("-inf")
         self.enable_cross_mem = getattr(self.args, 'enable_cross_mem', True)
+        self.prior_memory = PrototypeMemory.from_args(args) if self.enable_cross_mem else None
         self.update_guiding_prompt = getattr(self.args, 'update_guiding_prompt', True)
         self.exploration_rate = getattr(self.args, 'exploration_rate', 0.65)
         self.exploration_alpha = getattr(self.args, 'exploration_alpha', 1.0)
@@ -244,7 +252,7 @@ class JitRLAgent:
                 info=info
             )
             
-        if not nearest_trajectories:
+        if not nearest_trajectories and self.prior_memory is None:
             return {}
             
         # Add actions from nearest_trajectories to options_with_logits
@@ -302,30 +310,39 @@ class JitRLAgent:
         else:
             overall_avg_reward = 0
         
-        # Calculate adaptive exploration probability based on trajectory count and quality
-        exploration_prob = self.calculate_exploration_probability(nearest_trajectories, action_rewards)
-
-        alpha = self.exploration_alpha
-        new_actions_added = False
-        for option_num, option_data in options_with_logits.items():
-            action = option_data['action']
-            if action not in action_avg_rewards:
-                rad = random.random()
-                print(f"action: {action} rad:{rad}")
-                if rad < exploration_prob:
-                    # UCB-style exploration bonus: decreases as sample count increases
-                    if count > 0:
-                        action_avg_rewards[action] = overall_avg_reward + alpha / count
+        prior_values = None
+        if self.prior_memory is not None:
+            prior_values = self.prior_memory.estimate(
+                state_node.state, action_rewards,
+                [option['action'] for option in options_with_logits.values()],
+            )
+        if prior_values is not None:
+            action_avg_rewards, overall_avg_reward = prior_values
+        elif not nearest_trajectories:
+            return {}
+        else:
+            exploration_prob = self.calculate_exploration_probability(nearest_trajectories, action_rewards)
+            alpha = self.exploration_alpha
+            new_actions_added = False
+            for option_num, option_data in options_with_logits.items():
+                action = option_data['action']
+                if action not in action_avg_rewards:
+                    rad = random.random()
+                    print(f"action: {action} rad:{rad}")
+                    if rad < exploration_prob:
+                        # UCB-style exploration bonus: decreases as sample count increases
+                        if count > 0:
+                            action_avg_rewards[action] = overall_avg_reward + alpha / count
+                        else:
+                            action_avg_rewards[action] = overall_avg_reward + alpha
                     else:
-                        action_avg_rewards[action] = overall_avg_reward + alpha
-                else:
-                    action_avg_rewards[action] = 0
-                new_actions_added = True
+                        action_avg_rewards[action] = 0
+                    new_actions_added = True
 
-        # If new actions were added, recalculate overall_avg_reward
-        if new_actions_added:
-            all_avg_rewards = list(action_avg_rewards.values())
-            overall_avg_reward = sum(all_avg_rewards) / len(all_avg_rewards) if all_avg_rewards else 0
+            # If new actions were added, recalculate overall_avg_reward
+            if new_actions_added:
+                all_avg_rewards = list(action_avg_rewards.values())
+                overall_avg_reward = sum(all_avg_rewards) / len(all_avg_rewards) if all_avg_rewards else 0
 
         # Calculate advantage value for each action
         action_advantages = {}
@@ -560,6 +577,14 @@ KEY RULES:
 
 {valid_actions_text}
 """
+        if self.prior_memory is not None:
+            action_types = self.prior_memory.action_types(state_node.state)
+            if action_types:
+                user_prompt += (
+                    '\nPrior memory action types: ' + ', '.join(action_types) + '.\n'
+                    'Consider these types when you propose actions. Use objects from the current state. '
+                    'If reference actions are supplied, select only those actions.\n'
+                )
         return sys_prompt, user_prompt, memory_text
 
     # Generates the next action from the LLM based on its memory and the current state node.

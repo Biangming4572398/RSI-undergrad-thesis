@@ -1,6 +1,7 @@
 import os
 import argparse
 from src.evaluation import GameEvaluator
+from jitrl_prior import add_prior_arguments
 
 try:
     from debug_fix import setup_multiprocessing_for_debug
@@ -11,6 +12,7 @@ except ImportError:
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    add_prior_arguments(parser)
     
     # Game
     parser.add_argument('--rom_path', default='jericho-games/', type=str, help="Path to the directory containing game ROMs.")
