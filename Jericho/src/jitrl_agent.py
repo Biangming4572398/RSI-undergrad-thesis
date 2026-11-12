@@ -740,6 +740,7 @@ KEY RULES:
             response_format=response_format,
         )
 
+        options_with_logits = {}  # Stays empty when the API call fails.
         if (
             res_obj
             and hasattr(res_obj, "choices")

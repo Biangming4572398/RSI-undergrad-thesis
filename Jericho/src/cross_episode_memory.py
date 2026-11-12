@@ -32,6 +32,8 @@ class CrossEpisodeMemory:
 
         # Initialize episode counter (will be set properly in add_episode)
         self.current_episode_number = 0
+        # Jericho drops the last step of a successful episode; ALFWorld keeps it.
+        self.keep_final_step = False
 
         # Initialize vector database
         self._init_vector_database()
@@ -586,7 +588,8 @@ class CrossEpisodeMemory:
             delta_scores.append(delta)
             prev_score = current_score
 
-        num_steps = len(states) - 1 if success and len(states) > 0 else len(states)
+        drop_final_step = success and len(states) > 0 and not self.keep_final_step
+        num_steps = len(states) - 1 if drop_final_step else len(states)
 
         episode = {
             'timestamp': os.path.basename(self.base_dir),  # Use directory name as timestamp

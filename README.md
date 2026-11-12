@@ -52,6 +52,7 @@ We theoretically prove that this additive update rule is the **exact closed-form
 |-------------|--------|-------|-------------|
 | **Jericho** | Text Adventure Games | 16+ games | Interactive fiction games (Zork, Library, etc.) |
 | **WebArena** | Web Automation | 812 tasks | Real-world web tasks (shopping, admin, maps, etc.) |
+| **ALFWorld** | Household Tasks | 134 unseen + 140 seen games | Text-only household tasks (find, clean, heat, cool, place objects) |
 
 ---
 
@@ -112,6 +113,35 @@ Start the WebArena website services and set their URLs before you run a task.
 Python packages do not include these services. See the
 [BrowserGym WebArena setup guide](https://github.com/ServiceNow/BrowserGym/tree/main/browsergym/webarena).
 
+### ALFWorld Setup (Household Tasks)
+
+```bash
+uv sync --locked --extra alfworld
+source .venv/bin/activate
+```
+
+A sync installs only the extras you name. To keep WebArena as well, run `uv sync --locked --extra alfworld --extra webarena`.
+ALFWorld needs `fast-downward-textworld`, which builds from source with CMake and a C++ compiler.
+On macOS, a build error such as `'memory' file not found` means an old Command Line Tools header folder
+hides the SDK headers. Clear the failed build and point the compiler at the SDK:
+
+```bash
+uv cache clean fast-downward-textworld
+CXXFLAGS="-isystem $(xcrun --show-sdk-path)/usr/include/c++/v1" uv sync --locked --extra alfworld
+```
+
+The pipeline reads the text-only game files from `ALFWorld/data/`. Git ignores this folder.
+Download them once (36 MB, 336 MB unpacked):
+
+```bash
+mkdir -p ALFWorld/data
+curl -L -o ALFWorld/data/tw-pddl.zip https://github.com/alfworld/alfworld/releases/download/0.4.0/json_2.1.2_tw-pddl.zip
+unzip -q ALFWorld/data/tw-pddl.zip -d ALFWorld/data && rm ALFWorld/data/tw-pddl.zip
+```
+
+If you already ran `alfworld-download`, pass `--data_path ~/.cache/alfworld` instead.
+See the [ALFWorld repository](https://github.com/alfworld/alfworld) for the dataset.
+
 After a later `uv sync`, repeat the spaCy model installation if you use Jericho.
 The model is a separate download and is not in the lock file.
 Use the activated environment for the commands below. This prevents `uv run` from removing an extra during a sync.
@@ -156,7 +186,7 @@ WA_WIKIPEDIA=http://localhost:8888
 WA_HOMEPAGE=http://localhost:4399
 ```
 
-Jericho uses different key names. Set `OPENAI_API_KEY` to the OpenRouter key for Jericho runs.
+Jericho and ALFWorld use different key names. Set `OPENAI_API_KEY` to the OpenRouter key for their runs.
 Set `OPENAI_API_KEY2` to a direct OpenAI key for its memory embeddings.
 For WebArena, also export the `WA_*` variables in the shell, or put them in `WebArena/env_setup.txt`.
 BrowserGym reads these variables before the agent loads the root `.env` file.
@@ -228,6 +258,47 @@ python test_webarena_lite.py --tasks 0 --repeat 10 --disable_memory
 | `--max_steps` | `30` | Max steps per episode |
 | `--disable_memory` | `False` | Disable memory system |
 
+### ALFWorld: Household Tasks
+
+```bash
+cd ALFWorld
+
+# Run JitRL once on each of the 134 unseen games
+python main.py --agent_type jitrl
+
+# Three passes over the games; memory from earlier passes guides later ones
+python main.py --rounds 3
+
+# One task type (ids 1-6 or names), first 20 game ids
+python main.py --task_types pick_heat_then_place_in_recep --start 0 --end 20 --rounds 3
+
+# Baselines: JitRL prompts without memory, and a memoryless single-call agent
+python main.py --no-enable_cross_mem
+python main.py --agent_type naive
+```
+
+The ALFWorld agent reuses the Jericho JitRL agent and memory. It changes the prompts, takes success from the
+environment, and stores the winning step of each episode. The default retrieval threshold of `0.95` mostly
+matches steps from the same game. Lower `--retrieval_threshold` to share experience across different games.
+Memory is kept in `output/alfworld/<agent>/<model>/` across games, rounds, and runs. Use a new `--output_path`
+to start with empty memory. Each run writes episode logs and a summary with the success rate overall,
+per round, and per task type.
+
+**Key Arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--split` | `valid_unseen` | `valid_unseen` (134 games), `valid_seen` (140), `valid_train`, `train` |
+| `--task_types` | all | Comma-separated task types, as ids 1-6 or names |
+| `--games` / `--start` / `--end` | all | Game ids are indices in the sorted split |
+| `--rounds` | `1` | Passes over the selected games |
+| `--shuffle` | `True` | Shuffle the game order once with `--seed`; `--no-shuffle` keeps id order |
+| `--agent_type` | `jitrl` | Agent: `jitrl`, `naive` |
+| `--env_step_limit` | `50` | Max steps per episode |
+| `--data_path` | `ALFWorld/data` | Folder with `json_2.1.1/<split>/` |
+
+The memory and LLM options match the Jericho runner.
+
 ---
 
 ## Architecture
@@ -267,6 +338,16 @@ JitRL/
 │   │   └── live_evaluator.py         # Real-time evaluation
 │   ├── config_files/                 # Full WebArena (812 tasks)
 │   └── config_files_lite/            # WebArena-Lite (165 tasks)
+│
+├── ALFWorld/                         # Household Tasks
+│   ├── main.py                       # Entry point
+│   ├── data/                         # Game files (downloaded, not in git)
+│   └── src/
+│       ├── jitrl_agent.py            # Jericho JitRL agent with ALFWorld prompts
+│       ├── naive_agent.py            # Memoryless baseline agent
+│       ├── prompts.py                # Prompt text, progress summary, action matching
+│       ├── evaluation.py             # Game selection, episode loop, summary
+│       └── env.py                    # TextWorld ALFWorld wrapper
 │
 └── README.md
 ```
@@ -340,6 +421,7 @@ python jitrl_prior.py \
 ```
 
 Each `--source` takes a domain name, a positive return scale, and a file path.
+ALFWorld memory uses the Jericho episode format, so its `episodes.jsonl` also works as a source.
 The builder divides returns by that scale. For example, scale `10` maps return `10` to value `1`.
 Choose source and target scales that give values the same meaning.
 The builder preserves the return calculation of each environment.
@@ -464,6 +546,7 @@ If you use JitRL in your research, please cite:
 
 - [Jericho](https://github.com/microsoft/jericho) - Text adventure game framework by Microsoft Research
 - [BrowserGym](https://github.com/ServiceNow/BrowserGym) - Web automation framework by ServiceNow
+- [ALFWorld](https://github.com/alfworld/alfworld) - Text-based household task benchmark
 - [WebArena](https://webarena.dev/) - Web agent benchmark by CMU
 
 ---
