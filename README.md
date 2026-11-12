@@ -168,15 +168,37 @@ python -m unittest discover -s tests -v
 
 ### Environment Configuration
 
-Create a `.env` file in the project root:
+The pipelines read API keys from `.env` files. `OPENAI_API_KEY` means an OpenRouter key in Jericho and ALFWorld
+but a direct OpenAI key in WebArena, so keep two files. Git ignores both.
+
+For Jericho and ALFWorld, create `.env` in the project root:
 
 ```bash
-# WebArena: OpenRouter models
-OPENROUTER_API_KEY=your_openrouter_key
-# WebArena: direct OpenAI models
-OPENAI_API_KEY=your_openai_key
+# OpenRouter key: agent, summary, and step-scoring calls
+OPENAI_API_KEY=your_openrouter_key
+# Direct OpenAI key: memory embeddings
+OPENAI_API_KEY2=your_openai_key
+```
 
-# WebArena URLs (if running locally)
+For WebArena, create `WebArena/.env`:
+
+```bash
+# OpenRouter models
+OPENROUTER_API_KEY=your_openrouter_key
+# Direct OpenAI models and memory embeddings
+OPENAI_API_KEY=your_openai_key
+```
+
+Each pipeline looks for `.env` from its own code folder up to the project root and uses the first file it finds.
+WebArena therefore reads `WebArena/.env`, and Jericho and ALFWorld read the root file.
+Values in `.env` replace shell variables with the same name.
+Under a debugger, the search starts from the working directory instead. Start WebArena from `WebArena/`,
+and Jericho or ALFWorld from their own folder or the project root.
+
+For WebArena, also export the `WA_*` site URLs in the shell, or put them in `WebArena/env_setup.txt`.
+BrowserGym reads these variables before the agent loads `.env`.
+
+```bash
 WA_SHOPPING=http://localhost:7770
 WA_SHOPPING_ADMIN=http://localhost:7780/admin
 WA_REDDIT=http://localhost:9999
@@ -185,11 +207,6 @@ WA_MAP=http://localhost:3000
 WA_WIKIPEDIA=http://localhost:8888
 WA_HOMEPAGE=http://localhost:4399
 ```
-
-Jericho and ALFWorld use different key names. Set `OPENAI_API_KEY` to the OpenRouter key for their runs.
-Set `OPENAI_API_KEY2` to a direct OpenAI key for its memory embeddings.
-For WebArena, also export the `WA_*` variables in the shell, or put them in `WebArena/env_setup.txt`.
-BrowserGym reads these variables before the agent loads the root `.env` file.
 
 ---
 
