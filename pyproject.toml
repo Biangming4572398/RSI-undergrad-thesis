@@ -1,0 +1,43 @@
+[project]
+name = "rsi-undergrad-thesis"
+version = "0.1.0"
+description = "JitRL agents for Jericho and WebArena"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "jericho>=3.3.1,<4",
+    # Jericho memory retrieval returns no results without FAISS.
+    "faiss-cpu>=1.8,<2",
+    "numpy>=1.26,<3",
+    "openai>=1.104,<3",
+    "python-dotenv>=1,<2",
+    "tiktoken>=0.7,<1",
+]
+
+[project.optional-dependencies]
+codex = ["openai-codex>=0.167.1"]
+webarena = [
+    "browsergym-core==0.14.3",
+    "browsergym-experiments[webarena]==0.14.3",
+    "beartype==0.12.0",
+    "huggingface-hub>=0.34,<1",
+    "joblib",
+    # The agent imports legacy LangChain modules.
+    "langchain>=0.3.27,<0.4",
+    "langchain-community>=0.3.27,<0.4",
+    "langchain-openai>=0.3.35,<0.4",
+    "nltk>=3.9,<4",
+    "pillow>=10.1",
+    # BrowserGym requires this browser and Python client version.
+    "playwright==1.44.0",
+    "pydantic>=2.7,<3",
+    "pyyaml>=6,<7",
+    "rank-bm25>=0.2.2,<0.3",
+    "requests>=2,<3",
+    "transformers>=4.45,<5",
+]
+
+[tool.uv]
+package = false
+# These extras require incompatible versions of packaging.
+conflicts = [[{ extra = "codex" }, { extra = "webarena" }]]
