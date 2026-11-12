@@ -1,16 +1,8 @@
-openai
-requests
-pillow
-bs4
-matplotlib
-termcolor
-human_id
-pandas
-easy_ocr
-einops
-transformers_stream_generator
-tiktoken
-numpy
-beartype
-nltk
-playwright
+# Standalone evaluator dependencies. Use the root webarena extra for the agent.
+openai>=1.104,<3
+requests>=2,<3
+pillow>=10.1
+numpy>=1.26,<3
+beartype==0.12.0
+nltk>=3.9,<4
+playwright==1.44.0

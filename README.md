@@ -68,37 +68,72 @@ We theoretically prove that this additive update rule is the **exact closed-form
 
 ### Prerequisites
 
-- Python 3.10+
-- OpenRouter API key (for LLM inference)
+- Python 3.11 is the default. The dependency files support Python 3.10 to 3.12.
+- Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- On Linux, install GCC, G++, and Make to build Jericho.
+- Supply API keys for the selected remote models.
 
-### Clone Repository
+Run the installation commands from the repository root.
+`pyproject.toml` lists the dependencies. `uv.lock` records the resolved versions.
+The default installation includes Jericho. The `webarena` extra adds browser tasks and evaluation.
 
-```bash
-git clone https://github.com/your-username/JitRL.git
-cd JitRL
-```
+BrowserGym 0.14.3 requires Playwright 1.44.0. Its Greenlet dependency limits this setup to Python 3.12 or earlier.
+The agent also uses legacy LangChain imports, so the dependency files select the 0.3 series.
+See the [BrowserGym metadata](https://pypi.org/pypi/browsergym-core/0.14.3/json)
+and [LangChain migration guide](https://docs.langchain.com/oss/python/migrate/langchain-v1).
+
+The installation excludes PyTorch, Accelerate, and vLLM. Use remote API models on this device.
+WebArena still imports Transformers and Hugging Face classes. These packages do not install LLM weights.
 
 ### Jericho Setup (Text Adventure Games)
 
 ```bash
-cd Jericho
-
-# Install dependencies
-pip install jericho openai tiktoken numpy python-dotenv
-
-# Download game ROMs (required)
-# Place .z5/.z8 files in jericho-games/ directory
-# Games available: zork1, zork3, library, detective, etc.
+uv sync --locked
+source .venv/bin/activate
+python -m spacy download en_core_web_sm
 ```
+
+Jericho uses the small spaCy model to parse game text. It does not use it for LLM inference.
+Place game ROM files in `Jericho/jericho-games/`, or set `--rom_path`.
+FAISS is included because Jericho memory retrieval requires it.
+See the [Jericho setup guide](https://ms-jericho.readthedocs.io/en/latest/tutorial_quick.html).
 
 ### WebArena Setup (Web Automation)
 
 ```bash
-cd WebArena
+uv sync --locked --extra webarena
+source .venv/bin/activate
+python -m playwright install chromium
+python -m nltk.downloader punkt_tab
+```
 
-# Install dependencies
-pip install browsergym-core browsergym-experiments
-pip install openai tiktoken numpy langchain pillow
+Install the required browser system libraries if Playwright reports missing libraries.
+Start the WebArena website services and set their URLs before you run a task.
+Python packages do not include these services. See the
+[BrowserGym WebArena setup guide](https://github.com/ServiceNow/BrowserGym/tree/main/browsergym/webarena).
+
+After a later `uv sync`, repeat the spaCy model installation if you use Jericho.
+The model is a separate download and is not in the lock file.
+Use the activated environment for the commands below. This prevents `uv run` from removing an extra during a sync.
+
+For a pip installation, first create and activate a Python 3.11 environment. Then export the selected packages:
+
+```bash
+uv export --locked --extra webarena --no-emit-project --format requirements-txt --output-file /tmp/jitrl-requirements.txt
+python -m pip install -r /tmp/jitrl-requirements.txt
+```
+
+Omit `--extra webarena` for Jericho only.
+`WebArena/autoeval/requirements.txt` covers the standalone evaluator. It does not install the browser agent.
+
+The existing Codex SDK dependency is available with `uv sync --locked --extra codex`.
+Codex and WebArena require incompatible versions of `packaging`. Use separate environments for these extras.
+Do not use `--all-extras`.
+
+Check the prior-memory tests without starting a game or browser:
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
 ### Environment Configuration
@@ -106,8 +141,10 @@ pip install openai tiktoken numpy langchain pillow
 Create a `.env` file in the project root:
 
 ```bash
-# OpenRouter API (for LLM inference)
+# WebArena: OpenRouter models
 OPENROUTER_API_KEY=your_openrouter_key
+# WebArena: direct OpenAI models
+OPENAI_API_KEY=your_openai_key
 
 # WebArena URLs (if running locally)
 WA_SHOPPING=http://localhost:7770
@@ -116,7 +153,13 @@ WA_REDDIT=http://localhost:9999
 WA_GITLAB=http://localhost:8023
 WA_MAP=http://localhost:3000
 WA_WIKIPEDIA=http://localhost:8888
+WA_HOMEPAGE=http://localhost:4399
 ```
+
+Jericho uses different key names. Set `OPENAI_API_KEY` to the OpenRouter key for Jericho runs.
+Set `OPENAI_API_KEY2` to a direct OpenAI key for its memory embeddings.
+For WebArena, also export the `WA_*` variables in the shell, or put them in `WebArena/env_setup.txt`.
+BrowserGym reads these variables before the agent loads the root `.env` file.
 
 ---
 
